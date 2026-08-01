@@ -44,6 +44,10 @@ class GitHubPortfolioService:
         self._lock = Lock()
 
     @staticmethod
+    def enabled() -> bool:
+        return os.getenv("LANTERN_GITHUB_ENABLED", "false").strip().lower() == "true"
+
+    @staticmethod
     def repositories() -> list[str]:
         raw = os.getenv("LANTERN_GITHUB_REPOSITORIES", "")
         values = [item.strip() for item in raw.split(",") if item.strip()]
@@ -66,7 +70,8 @@ class GitHubPortfolioService:
     def _http(self) -> httpx.Client:
         return self._client or httpx.Client(base_url="https://api.github.com", headers=self._headers(), timeout=8.0)
 
-    def _get(self, client: httpx.Client, path: str, params: dict[str, Any] | None = None) -> Any:
+    @staticmethod
+    def _get(client: httpx.Client, path: str, params: dict[str, Any] | None = None) -> Any:
         response = client.get(path, params=params)
         response.raise_for_status()
         return response.json()
@@ -86,14 +91,30 @@ class GitHubPortfolioService:
         health = "healthy" if score >= 80 else "attention" if score >= 55 else "critical"
         return max(score, 0), health
 
+    def _unavailable(self, repository: str, reason: str) -> RepositoryHealth:
+        return RepositoryHealth(
+            repository=repository,
+            default_branch=None,
+            open_issues=None,
+            open_pull_requests=None,
+            latest_workflow="unavailable",
+            latest_release=None,
+            health="unavailable",
+            score=0,
+            refreshed_at=datetime.now(UTC).isoformat(),
+            error=reason,
+        )
+
     def fetch_repository(self, repository: str, force: bool = False) -> RepositoryHealth:
+        if not self.enabled() and self._client is None:
+            return self._unavailable(repository, "GitHub integration is disabled")
         now = time.time()
         with self._lock:
             cached = self._cache.get(repository)
         if cached and not force and now - cached[0] < self.ttl_seconds():
             return cached[1]
-
         timestamp = datetime.now(UTC).isoformat()
+        client: httpx.Client | None = None
         try:
             client = self._http()
             repo = self._get(client, f"/repos/{repository}")
@@ -117,32 +138,21 @@ class GitHubPortfolioService:
             )
             with self._lock:
                 self._cache[repository] = (now, result)
-            if self._client is None:
-                client.close()
             return result
-        except Exception as exc:  # connector failures are isolated per repository
+        except Exception as exc:
             if cached:
-                stale = RepositoryHealth(**{**cached[1].to_dict(), "stale": True, "error": str(exc), "refreshed_at": timestamp})
-                return stale
-            return RepositoryHealth(
-                repository=repository,
-                default_branch=None,
-                open_issues=None,
-                open_pull_requests=None,
-                latest_workflow="unavailable",
-                latest_release=None,
-                health="unavailable",
-                score=0,
-                refreshed_at=timestamp,
-                stale=False,
-                error=str(exc),
-            )
+                return RepositoryHealth(**{**cached[1].to_dict(), "stale": True, "error": str(exc), "refreshed_at": timestamp})
+            return self._unavailable(repository, str(exc))
+        finally:
+            if client is not None and self._client is None:
+                client.close()
 
     def portfolio(self, force: bool = False) -> dict[str, Any]:
         repositories = [self.fetch_repository(name, force=force) for name in self.repositories()]
         available = [repo for repo in repositories if repo.health != "unavailable"]
         score = round(sum(repo.score for repo in available) / len(available)) if available else 0
         return {
+            "enabled": self.enabled() or self._client is not None,
             "score": score,
             "health": "healthy" if score >= 80 else "attention" if score >= 55 else "critical",
             "repository_count": len(repositories),
