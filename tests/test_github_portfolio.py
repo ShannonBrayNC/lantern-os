@@ -1,5 +1,3 @@
-import os
-
 import httpx
 
 from app.github_portfolio import GitHubPortfolioService
@@ -10,17 +8,30 @@ def mock_handler(request: httpx.Request) -> httpx.Response:
     if path.endswith("/pulls"):
         return httpx.Response(200, json=[{"number": 1}])
     if path.endswith("/actions/runs"):
-        return httpx.Response(200, json={"workflow_runs": [{"status": "completed", "conclusion": "success"}]})
+        return httpx.Response(
+            200,
+            json={
+                "workflow_runs": [
+                    {"status": "completed", "conclusion": "success"}
+                ]
+            },
+        )
     if path.endswith("/releases"):
         return httpx.Response(200, json=[{"tag_name": "v0.8.0"}])
     if path.endswith("/broken"):
         return httpx.Response(500, json={"message": "failure"})
-    return httpx.Response(200, json={"default_branch": "main", "open_issues_count": 4, "archived": False})
+    return httpx.Response(
+        200,
+        json={"default_branch": "main", "open_issues_count": 4, "archived": False},
+    )
 
 
 def test_portfolio_uses_mocked_github_responses(monkeypatch):
     monkeypatch.setenv("LANTERN_GITHUB_REPOSITORIES", "example/healthy")
-    client = httpx.Client(transport=httpx.MockTransport(mock_handler), base_url="https://api.github.test")
+    client = httpx.Client(
+        transport=httpx.MockTransport(mock_handler),
+        base_url="https://api.github.test",
+    )
     service = GitHubPortfolioService(client=client)
     result = service.portfolio()
     repo = result["repositories"][0]
@@ -39,7 +50,10 @@ def test_connector_failure_is_isolated(monkeypatch):
     def failing_handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(503, json={"message": "offline"})
 
-    client = httpx.Client(transport=httpx.MockTransport(failing_handler), base_url="https://api.github.test")
+    client = httpx.Client(
+        transport=httpx.MockTransport(failing_handler),
+        base_url="https://api.github.test",
+    )
     service = GitHubPortfolioService(client=client)
     result = service.portfolio()
     assert result["repository_count"] == 1

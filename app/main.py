@@ -12,10 +12,27 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.auth import Principal, auth_mode, build_oauth, current_principal, principal_from_claims, require_roles, session_secret
+from app.auth import (
+    Principal,
+    auth_mode,
+    build_oauth,
+    current_principal,
+    principal_from_claims,
+    require_roles,
+    session_secret,
+)
 from app.database import engine, get_session
 from app.github_portfolio import portfolio_service
-from app.models import Base, KPI, Milestone, Opportunity, ResearchProgram, SchemaMeta, Setting, Task
+from app.models import (
+    Base,
+    KPI,
+    Milestone,
+    Opportunity,
+    ResearchProgram,
+    SchemaMeta,
+    Setting,
+    Task,
+)
 
 VERSION = "0.8.0"
 
@@ -58,31 +75,119 @@ def seed_database(session: Session) -> None:
         if session.get(Setting, key) is None:
             session.add(Setting(key=key, value=value))
     if session.scalar(select(Task.id).limit(1)) is None:
-        session.add_all([
-            Task(title="Publish ETS category thesis", workstream="Marketing", priority="P0", revenue_impact="High", due_date="2026-08-03"),
-            Task(title="Complete evidence-object API slice", workstream="Engineering", priority="P0", revenue_impact="High", due_date="2026-08-05"),
-            Task(title="Contact ten design-partner prospects", workstream="Sales", priority="P0", revenue_impact="High", due_date="2026-08-04"),
-            Task(title="Advance Evidence Graph working paper", workstream="Research", priority="P1", revenue_impact="Medium", due_date="2026-08-07"),
-        ])
+        session.add_all(
+            [
+                Task(
+                    title="Publish ETS category thesis",
+                    workstream="Marketing",
+                    priority="P0",
+                    revenue_impact="High",
+                    due_date="2026-08-03",
+                ),
+                Task(
+                    title="Complete evidence-object API slice",
+                    workstream="Engineering",
+                    priority="P0",
+                    revenue_impact="High",
+                    due_date="2026-08-05",
+                ),
+                Task(
+                    title="Contact ten design-partner prospects",
+                    workstream="Sales",
+                    priority="P0",
+                    revenue_impact="High",
+                    due_date="2026-08-04",
+                ),
+                Task(
+                    title="Advance Evidence Graph working paper",
+                    workstream="Research",
+                    priority="P1",
+                    revenue_impact="Medium",
+                    due_date="2026-08-07",
+                ),
+            ]
+        )
     if session.scalar(select(Opportunity.id).limit(1)) is None:
-        session.add_all([
-            Opportunity(account="Healthcare design partner", stage="Discovery", value=75000, probability=.25, next_action="Schedule architecture workshop", next_date="2026-08-05"),
-            Opportunity(account="State-government pilot", stage="Prospecting", value=150000, probability=.10, next_action="Identify executive sponsor", next_date="2026-08-06"),
-            Opportunity(account="Enterprise evidence assessment", stage="Proposal", value=50000, probability=.50, next_action="Send scoped proposal", next_date="2026-08-03"),
-        ])
+        session.add_all(
+            [
+                Opportunity(
+                    account="Healthcare design partner",
+                    stage="Discovery",
+                    value=75000,
+                    probability=0.25,
+                    next_action="Schedule architecture workshop",
+                    next_date="2026-08-05",
+                ),
+                Opportunity(
+                    account="State-government pilot",
+                    stage="Prospecting",
+                    value=150000,
+                    probability=0.10,
+                    next_action="Identify executive sponsor",
+                    next_date="2026-08-06",
+                ),
+                Opportunity(
+                    account="Enterprise evidence assessment",
+                    stage="Proposal",
+                    value=50000,
+                    probability=0.50,
+                    next_action="Send scoped proposal",
+                    next_date="2026-08-03",
+                ),
+            ]
+        )
     if session.scalar(select(ResearchProgram.id).limit(1)) is None:
-        session.add_all([
-            ResearchProgram(title="Evidence Object Model", progress=70, commercial_output="Specification, sales brief, SDK schema", next_action="Complete validation rules"),
-            ResearchProgram(title="Evidence Graph Model", progress=45, commercial_output="Reference architecture and graph model", next_action="Define contradiction edges"),
-            ResearchProgram(title="Policy-Bound Trust Evaluation", progress=30, commercial_output="Trust-policy engine requirements", next_action="Formalize threshold semantics"),
-        ])
+        session.add_all(
+            [
+                ResearchProgram(
+                    title="Evidence Object Model",
+                    progress=70,
+                    commercial_output="Specification, sales brief, SDK schema",
+                    next_action="Complete validation rules",
+                ),
+                ResearchProgram(
+                    title="Evidence Graph Model",
+                    progress=45,
+                    commercial_output="Reference architecture and graph model",
+                    next_action="Define contradiction edges",
+                ),
+                ResearchProgram(
+                    title="Policy-Bound Trust Evaluation",
+                    progress=30,
+                    commercial_output="Trust-policy engine requirements",
+                    next_action="Formalize threshold semantics",
+                ),
+            ]
+        )
     if session.scalar(select(Milestone.id).limit(1)) is None:
-        session.add_all([
-            Milestone(title="First design partner", target_date="2026-10-15", progress=20, owner="Founder"),
-            Milestone(title="ETS alpha demonstration", target_date="2026-12-15", progress=15, owner="Founder"),
-            Milestone(title="$500K ARR run rate", target_date="2027-02-01", progress=5, owner="Founder"),
-            Milestone(title="Commercial general availability", target_date="2027-07-15", progress=2, owner="Founder"),
-        ])
+        session.add_all(
+            [
+                Milestone(
+                    title="First design partner",
+                    target_date="2026-10-15",
+                    progress=20,
+                    owner="Founder",
+                ),
+                Milestone(
+                    title="ETS alpha demonstration",
+                    target_date="2026-12-15",
+                    progress=15,
+                    owner="Founder",
+                ),
+                Milestone(
+                    title="$500K ARR run rate",
+                    target_date="2027-02-01",
+                    progress=5,
+                    owner="Founder",
+                ),
+                Milestone(
+                    title="Commercial general availability",
+                    target_date="2027-07-15",
+                    progress=2,
+                    owner="Founder",
+                ),
+            ]
+        )
     for key, label, target, unit in [
         ("outreach", "Weekly outreach", 50, "count"),
         ("discovery", "Discovery calls", 10, "count"),
@@ -103,12 +208,25 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Lantern OS", version=VERSION, lifespan=lifespan)
-app.add_middleware(SessionMiddleware, secret_key=session_secret(), https_only=os.getenv("LANTERN_COOKIE_HTTPS_ONLY", "false").lower() == "true", same_site="lax")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=session_secret(),
+    https_only=os.getenv("LANTERN_COOKIE_HTTPS_ONLY", "false").lower() == "true",
+    same_site="lax",
+)
 oauth = build_oauth()
 
 
 def task_dict(task: Task) -> dict:
-    return {"id": task.id, "title": task.title, "workstream": task.workstream, "priority": task.priority, "revenue_impact": task.revenue_impact, "due_date": task.due_date, "completed": bool(task.completed)}
+    return {
+        "id": task.id,
+        "title": task.title,
+        "workstream": task.workstream,
+        "priority": task.priority,
+        "revenue_impact": task.revenue_impact,
+        "due_date": task.due_date,
+        "completed": bool(task.completed),
+    }
 
 
 def money(value: float) -> str:
@@ -121,15 +239,45 @@ def esc(value: object) -> str:
 
 def recommendations(session: Session) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
-    proposal = session.scalars(select(Opportunity).where(Opportunity.stage == "Proposal").order_by(Opportunity.value.desc()).limit(1)).first()
+    proposal = session.scalars(
+        select(Opportunity)
+        .where(Opportunity.stage == "Proposal")
+        .order_by(Opportunity.value.desc())
+        .limit(1)
+    ).first()
     if proposal:
-        items.append({"level": "Revenue", "title": f"Advance {proposal.account}", "detail": proposal.next_action or "Define the next close action."})
-    p0 = session.scalars(select(Task).where(Task.completed.is_(False), Task.priority == "P0").order_by(Task.due_date).limit(1)).first()
+        items.append(
+            {
+                "level": "Revenue",
+                "title": f"Advance {proposal.account}",
+                "detail": proposal.next_action or "Define the next close action.",
+            }
+        )
+    p0 = session.scalars(
+        select(Task)
+        .where(Task.completed.is_(False), Task.priority == "P0")
+        .order_by(Task.due_date)
+        .limit(1)
+    ).first()
     if p0:
-        items.append({"level": "Execution", "title": p0.title, "detail": f"Due {p0.due_date or 'now'} · {p0.workstream}"})
-    paper = session.scalars(select(ResearchProgram).order_by(ResearchProgram.progress.desc()).limit(1)).first()
+        items.append(
+            {
+                "level": "Execution",
+                "title": p0.title,
+                "detail": f"Due {p0.due_date or 'now'} · {p0.workstream}",
+            }
+        )
+    paper = session.scalars(
+        select(ResearchProgram).order_by(ResearchProgram.progress.desc()).limit(1)
+    ).first()
     if paper:
-        items.append({"level": "Research", "title": f"Convert {paper.title} into market proof", "detail": paper.next_action or paper.commercial_output})
+        items.append(
+            {
+                "level": "Research",
+                "title": f"Convert {paper.title} into market proof",
+                "detail": paper.next_action or paper.commercial_output,
+            }
+        )
     return items[:3]
 
 
@@ -137,7 +285,9 @@ def recommendations(session: Session) -> list[dict[str, str]]:
 async def login(request: Request):
     if auth_mode() == "local":
         return RedirectResponse("/")
-    redirect_uri = os.getenv("LANTERN_ENTRA_REDIRECT_URI", str(request.url_for("auth_callback")))
+    redirect_uri = os.getenv(
+        "LANTERN_ENTRA_REDIRECT_URI", str(request.url_for("auth_callback"))
+    )
     return await oauth.entra.authorize_redirect(request, redirect_uri)
 
 
@@ -158,7 +308,14 @@ def logout(request: Request):
 @app.get("/api/health")
 def health(session: Session = Depends(get_session)) -> dict:
     schema = session.get(SchemaMeta, "version")
-    return {"status": "ok", "service": "lantern-os", "version": VERSION, "schema": schema.value if schema else "unknown", "auth_mode": auth_mode(), "database": engine.dialect.name}
+    return {
+        "status": "ok",
+        "service": "lantern-os",
+        "version": VERSION,
+        "schema": schema.value if schema else "unknown",
+        "auth_mode": auth_mode(),
+        "database": engine.dialect.name,
+    }
 
 
 @app.get("/api/me")
@@ -167,49 +324,81 @@ def me(principal: Principal = Depends(current_principal)) -> dict[str, str]:
 
 
 @app.get("/api/engineering")
-def engineering(_: Principal = Depends(require_roles("Viewer")), refresh: bool = False) -> dict:
+def engineering(
+    _: Principal = Depends(require_roles("Viewer")), refresh: bool = False
+) -> dict:
     return portfolio_service.portfolio(force=refresh)
 
 
 @app.get("/api/tasks", response_model=list[TaskOut])
-def list_tasks(_: Principal = Depends(require_roles("Viewer")), session: Session = Depends(get_session)) -> list[dict]:
-    return [task_dict(item) for item in session.scalars(select(Task).order_by(Task.completed, Task.priority, Task.due_date)).all()]
+def list_tasks(
+    _: Principal = Depends(require_roles("Viewer")),
+    session: Session = Depends(get_session),
+) -> list[dict]:
+    query = select(Task).order_by(Task.completed, Task.priority, Task.due_date)
+    return [task_dict(item) for item in session.scalars(query).all()]
 
 
 @app.post("/api/tasks", response_model=TaskOut)
-def create_task(payload: TaskCreate, _: Principal = Depends(require_roles("Operator")), session: Session = Depends(get_session)) -> dict:
+def create_task(
+    payload: TaskCreate,
+    _: Principal = Depends(require_roles("Operator")),
+    session: Session = Depends(get_session),
+) -> dict:
     task = Task(**payload.model_dump())
-    session.add(task); session.commit(); session.refresh(task)
+    session.add(task)
+    session.commit()
+    session.refresh(task)
     return task_dict(task)
 
 
 @app.patch("/api/tasks/{task_id}/toggle", response_model=TaskOut)
-def toggle_task(task_id: int, _: Principal = Depends(require_roles("Operator")), session: Session = Depends(get_session)) -> dict:
+def toggle_task(
+    task_id: int,
+    _: Principal = Depends(require_roles("Operator")),
+    session: Session = Depends(get_session),
+) -> dict:
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    task.completed = not task.completed; session.commit(); session.refresh(task)
+    task.completed = not task.completed
+    session.commit()
+    session.refresh(task)
     return task_dict(task)
 
 
 @app.delete("/api/tasks/{task_id}", status_code=204)
-def delete_task(task_id: int, _: Principal = Depends(require_roles("Owner")), session: Session = Depends(get_session)) -> None:
+def delete_task(
+    task_id: int,
+    _: Principal = Depends(require_roles("Owner")),
+    session: Session = Depends(get_session),
+) -> None:
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    session.delete(task); session.commit()
+    session.delete(task)
+    session.commit()
 
 
 @app.get("/api/settings")
-def list_settings(_: Principal = Depends(require_roles("Viewer")), session: Session = Depends(get_session)) -> dict[str, str]:
+def list_settings(
+    _: Principal = Depends(require_roles("Viewer")),
+    session: Session = Depends(get_session),
+) -> dict[str, str]:
     return {item.key: item.value for item in session.scalars(select(Setting)).all()}
 
 
 @app.put("/api/settings/{key}")
-def update_setting(key: str, payload: SettingUpdate, _: Principal = Depends(require_roles("Executive")), session: Session = Depends(get_session)) -> dict:
+def update_setting(
+    key: str,
+    payload: SettingUpdate,
+    _: Principal = Depends(require_roles("Executive")),
+    session: Session = Depends(get_session),
+) -> dict:
     item = session.get(Setting, key)
     if item is None:
-        item = Setting(key=key, value=payload.value); session.add(item)
+        item = Setting(key=key, value=payload.value)
+        session.add(item)
     else:
         item.value = payload.value
     session.commit()
@@ -217,49 +406,142 @@ def update_setting(key: str, payload: SettingUpdate, _: Principal = Depends(requ
 
 
 @app.get("/api/kpis")
-def list_kpis(_: Principal = Depends(require_roles("Viewer")), session: Session = Depends(get_session)) -> list[dict]:
-    return [{"key": i.key, "label": i.label, "target": i.target, "actual": i.actual, "unit": i.unit} for i in session.scalars(select(KPI).order_by(KPI.key)).all()]
+def list_kpis(
+    _: Principal = Depends(require_roles("Viewer")),
+    session: Session = Depends(get_session),
+) -> list[dict]:
+    return [
+        {
+            "key": item.key,
+            "label": item.label,
+            "target": item.target,
+            "actual": item.actual,
+            "unit": item.unit,
+        }
+        for item in session.scalars(select(KPI).order_by(KPI.key)).all()
+    ]
 
 
 @app.patch("/api/kpis/{key}")
-def update_kpi(key: str, payload: KPIUpdate, _: Principal = Depends(require_roles("Operator")), session: Session = Depends(get_session)) -> dict:
+def update_kpi(
+    key: str,
+    payload: KPIUpdate,
+    _: Principal = Depends(require_roles("Operator")),
+    session: Session = Depends(get_session),
+) -> dict:
     item = session.get(KPI, key)
     if item is None:
         raise HTTPException(status_code=404, detail="KPI not found")
-    item.actual = payload.actual; session.commit()
-    return {"key": item.key, "label": item.label, "target": item.target, "actual": item.actual, "unit": item.unit}
+    item.actual = payload.actual
+    session.commit()
+    return {
+        "key": item.key,
+        "label": item.label,
+        "target": item.target,
+        "actual": item.actual,
+        "unit": item.unit,
+    }
 
 
 @app.get("/api/recommendations")
-def get_recommendations(_: Principal = Depends(require_roles("Viewer")), session: Session = Depends(get_session)) -> list[dict[str, str]]:
+def get_recommendations(
+    _: Principal = Depends(require_roles("Viewer")),
+    session: Session = Depends(get_session),
+) -> list[dict[str, str]]:
     return recommendations(session)
 
 
 def render_dashboard(session: Session, principal: Principal) -> str:
-    settings = {i.key: i.value for i in session.scalars(select(Setting)).all()}
-    tasks = session.scalars(select(Task).order_by(Task.completed, Task.priority, Task.due_date)).all()
-    opportunities = session.scalars(select(Opportunity).order_by(Opportunity.value.desc())).all()
-    research = session.scalars(select(ResearchProgram).order_by(ResearchProgram.progress.desc())).all()
-    milestones = session.scalars(select(Milestone).order_by(Milestone.target_date)).all()
+    settings = {item.key: item.value for item in session.scalars(select(Setting)).all()}
+    tasks = session.scalars(
+        select(Task).order_by(Task.completed, Task.priority, Task.due_date)
+    ).all()
+    opportunities = session.scalars(
+        select(Opportunity).order_by(Opportunity.value.desc())
+    ).all()
+    research = session.scalars(
+        select(ResearchProgram).order_by(ResearchProgram.progress.desc())
+    ).all()
+    milestones = session.scalars(
+        select(Milestone).order_by(Milestone.target_date)
+    ).all()
     kpis = session.scalars(select(KPI).order_by(KPI.key)).all()
     portfolio = portfolio_service.portfolio()
     recs = recommendations(session)
-    pipeline = sum(i.value for i in opportunities); weighted = sum(i.value * i.probability for i in opportunities)
-    completed = sum(1 for i in tasks if i.completed); progress = round((completed / len(tasks) * 100) if tasks else 0)
-    overdue = sum(1 for i in tasks if not i.completed and i.due_date and i.due_date < date.today().isoformat())
-    task_rows = "".join(f'<tr class="{"done" if r.completed else ""}"><td><input type="checkbox" {"checked" if r.completed else ""} onchange="toggleTask({r.id})"></td><td><b>{esc(r.title)}</b><small>{esc(r.workstream)}</small></td><td>{esc(r.priority)}</td><td>{esc(r.due_date or "—")}</td><td>{esc(r.revenue_impact)}</td></tr>' for r in tasks)
-    rec_cards = "".join(f'<article><span>{esc(i["level"])}</span><h3>{esc(i["title"])}</h3><p>{esc(i["detail"])}</p></article>' for i in recs)
-    deal_cards = "".join(f'<article><span>{esc(r.stage)}</span><h3>{esc(r.account)}</h3><b>{money(r.value)}</b><small>{esc(r.next_action)}</small></article>' for r in opportunities)
-    research_cards = "".join(f'<article><span>{r.progress}%</span><h3>{esc(r.title)}</h3><small>{esc(r.next_action or r.commercial_output)}</small></article>' for r in research)
-    milestone_rows = "".join(f'<li><b>{esc(r.title)}</b><span>{esc(r.target_date)} · {r.progress}%</span></li>' for r in milestones)
-    kpi_cards = "".join(f'<article><small>{esc(r.label)}</small><b>{money(r.actual) if r.unit == "currency" else int(r.actual)}</b><span>Target {money(r.target) if r.unit == "currency" else int(r.target)}</span></article>' for r in kpis)
-    repo_rows = "".join(f'<tr><td><b>{esc(r["repository"])}</b><small>{"STALE · " if r["stale"] else ""}{esc(r["default_branch"] or "unavailable")}</small></td><td><span class="status {esc(r["health"])}">{esc(r["health"])}</span></td><td>{r["score"]}</td><td>{esc(r["open_pull_requests"] if r["open_pull_requests"] is not None else "—")}</td><td>{esc(r["latest_workflow"])}</td><td>{esc(r["latest_release"] or "—")}</td></tr>' for r in portfolio["repositories"])
-    org = esc(settings.get("organization_name", "Lantern Protocol")); focus = esc(settings.get("daily_focus", "Build the category. Ship the platform. Close the revenue.")); north_star = float(settings.get("north_star_arr", "9500000"))
+    pipeline = sum(item.value for item in opportunities)
+    weighted = sum(item.value * item.probability for item in opportunities)
+    completed = sum(1 for item in tasks if item.completed)
+    progress = round((completed / len(tasks) * 100) if tasks else 0)
+    overdue = sum(
+        1
+        for item in tasks
+        if not item.completed
+        and item.due_date
+        and item.due_date < date.today().isoformat()
+    )
+    task_rows = "".join(
+        f'<tr class="{"done" if item.completed else ""}"><td><input type="checkbox" '
+        f'{"checked" if item.completed else ""} onchange="toggleTask({item.id})"></td>'
+        f'<td><b>{esc(item.title)}</b><small>{esc(item.workstream)}</small></td>'
+        f'<td>{esc(item.priority)}</td><td>{esc(item.due_date or "—")}</td>'
+        f'<td>{esc(item.revenue_impact)}</td></tr>'
+        for item in tasks
+    )
+    rec_cards = "".join(
+        f'<article><span>{esc(item["level"])}</span><h3>{esc(item["title"])}</h3>'
+        f'<p>{esc(item["detail"])}</p></article>'
+        for item in recs
+    )
+    deal_cards = "".join(
+        f'<article><span>{esc(item.stage)}</span><h3>{esc(item.account)}</h3>'
+        f'<b>{money(item.value)}</b><small>{esc(item.next_action)}</small></article>'
+        for item in opportunities
+    )
+    research_cards = "".join(
+        f'<article><span>{item.progress}%</span><h3>{esc(item.title)}</h3>'
+        f'<small>{esc(item.next_action or item.commercial_output)}</small></article>'
+        for item in research
+    )
+    milestone_rows = "".join(
+        f'<li><b>{esc(item.title)}</b><span>{esc(item.target_date)} · '
+        f'{item.progress}%</span></li>'
+        for item in milestones
+    )
+    kpi_cards = "".join(
+        f'<article><small>{esc(item.label)}</small>'
+        f'<b>{money(item.actual) if item.unit == "currency" else int(item.actual)}</b>'
+        f'<span>Target '
+        f'{money(item.target) if item.unit == "currency" else int(item.target)}</span>'
+        f'</article>'
+        for item in kpis
+    )
+    repo_rows = "".join(
+        f'<tr><td><b>{esc(item["repository"])}</b>'
+        f'<small>{"STALE · " if item["stale"] else ""}'
+        f'{esc(item["default_branch"] or "unavailable")}</small></td>'
+        f'<td><span class="status {esc(item["health"])}">'
+        f'{esc(item["health"])}</span></td><td>{item["score"]}</td>'
+        f'<td>{esc(item["open_pull_requests"] if item["open_pull_requests"] is not None else "—")}</td>'
+        f'<td>{esc(item["latest_workflow"])}</td>'
+        f'<td>{esc(item["latest_release"] or "—")}</td></tr>'
+        for item in portfolio["repositories"]
+    )
+    org = esc(settings.get("organization_name", "Lantern Protocol"))
+    focus = esc(
+        settings.get(
+            "daily_focus",
+            "Build the category. Ship the platform. Close the revenue.",
+        )
+    )
+    north_star = float(settings.get("north_star_arr", "9500000"))
     return f"""<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Lantern OS {VERSION}</title><style>{CSS}</style></head><body><aside><h1>◇ Lantern OS</h1><p>Command Center</p><nav><a href='/'>Mission Control</a><a href='#today'>Today's Plan</a><a href='#engineering'>Engineering</a><a href='#revenue'>Sales CRM</a><a href='#research'>Research</a><a href='#roadmap'>Roadmap</a><a href='/docs'>API</a></nav><footer><small>NORTH STAR</small><b>{money(north_star)} ARR</b><span>{esc(settings.get('north_star_date','2028-02-01'))}</span><em>v{VERSION}</em></footer></aside><main><header><div><small>{org.upper()}</small><h2>Mission Control</h2></div><div><b>{esc(principal.name)}</b><small>{esc(principal.role)} · {engine.dialect.name}</small></div></header><section class='hero'><div><small>OPERATING MANDATE</small><h3>{focus}</h3><p>Daily command center for ETS commercialization.</p></div><strong>{progress}%<small> execution complete</small></strong></section><section class='stats'><article><small>Total pipeline</small><b>{money(pipeline)}</b></article><article><small>Weighted pipeline</small><b>{money(weighted)}</b></article><article><small>Engineering health</small><b>{portfolio['score']}%</b><span>{portfolio['available_count']}/{portfolio['repository_count']} available</span></article><article><small>Open tasks</small><b>{len(tasks)-completed}</b><span>{overdue} overdue</span></article></section><section class='panel'><h3>Today's recommended moves</h3><div class='cards'>{rec_cards}</div></section><section class='panel' id='engineering'><h3>Engineering portfolio</h3><p class='muted'>Cached GitHub data · refreshed {esc(portfolio['refreshed_at'])}</p><table><thead><tr><th>Repository</th><th>Health</th><th>Score</th><th>PRs</th><th>Workflow</th><th>Release</th></tr></thead><tbody>{repo_rows}</tbody></table></section><section class='panel' id='today'><h3>Daily execution</h3><table><thead><tr><th>Done</th><th>Task</th><th>Priority</th><th>Due</th><th>Impact</th></tr></thead><tbody>{task_rows}</tbody></table></section><section class='panel'><h3>Operating KPIs</h3><div class='stats'>{kpi_cards}</div></section><section class='grid'><div class='panel' id='revenue'><h3>Revenue engine</h3><div class='cards'>{deal_cards}</div></div><div class='panel' id='research'><h3>Research-to-revenue</h3><div class='cards'>{research_cards}</div></div></section><section class='panel' id='roadmap'><h3>18-month milestones</h3><ul>{milestone_rows}</ul></section><script>async function toggleTask(id){{await fetch(`/api/tasks/${{id}}/toggle`,{{method:'PATCH'}});location.reload();}}</script></main></body></html>"""
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(principal: Principal = Depends(current_principal), session: Session = Depends(get_session)) -> HTMLResponse:
+def dashboard(
+    principal: Principal = Depends(current_principal),
+    session: Session = Depends(get_session),
+) -> HTMLResponse:
     return HTMLResponse(render_dashboard(session, principal))
 
 
