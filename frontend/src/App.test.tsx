@@ -17,6 +17,6 @@ vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
 test('renders the authenticated Mission Control shell', async () => {
   render(<App />)
   expect(await screen.findByText('Lantern Owner')).toBeInTheDocument()
-  expect(screen.getByText('Ship frontend shell')).toBeInTheDocument()
+  expect(screen.getAllByText('Ship frontend shell')).toHaveLength(2)
   expect(screen.getByText('ShannonBrayNC/lantern-os')).toBeInTheDocument()
 })
