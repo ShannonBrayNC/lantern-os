@@ -4,7 +4,7 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -24,6 +24,31 @@ def create_database_engine() -> Engine:
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
     return create_engine(url, **kwargs)
+
+
+def normalize_legacy_data(target_engine: Engine) -> None:
+    """Repair values accepted by legacy SQLite schemas but rejected by typed ORM columns.
+
+    Older Lantern OS builds stored an empty string in ``tasks.created_at``. SQLAlchemy's
+    DateTime processor correctly rejects that value before model instances can load.
+    Normalize it before the first ORM query. The statement is safe and idempotent on
+    both SQLite and PostgreSQL.
+    """
+    inspector = inspect(target_engine)
+    if "tasks" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("tasks")}
+    if "created_at" not in columns:
+        return
+
+    with target_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE tasks "
+                "SET created_at = CURRENT_TIMESTAMP "
+                "WHERE created_at IS NULL OR TRIM(CAST(created_at AS TEXT)) = ''"
+            )
+        )
 
 
 engine = create_database_engine()
