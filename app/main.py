@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import html
 import os
-import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date, datetime
-from pathlib import Path
-from typing import Iterator
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import (
@@ -22,115 +21,10 @@ from app.auth import (
     require_roles,
     session_secret,
 )
+from app.database import engine, get_session
+from app.models import Base, KPI, Milestone, Opportunity, ResearchProgram, SchemaMeta, Setting, Task
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-DB_PATH = DATA_DIR / "lantern.db"
-VERSION = "0.6.0"
-
-
-def connect() -> sqlite3.Connection:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def get_db() -> Iterator[sqlite3.Connection]:
-    db = connect()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def initialize_database() -> None:
-    with connect() as db:
-        db.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,workstream TEXT NOT NULL DEFAULT 'Operations',priority TEXT NOT NULL DEFAULT 'P1',revenue_impact TEXT NOT NULL DEFAULT 'Medium',due_date TEXT,completed INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-            CREATE TABLE IF NOT EXISTS opportunities (id INTEGER PRIMARY KEY AUTOINCREMENT,account TEXT NOT NULL,stage TEXT NOT NULL,value REAL NOT NULL,probability REAL NOT NULL,next_action TEXT NOT NULL DEFAULT '',next_date TEXT);
-            CREATE TABLE IF NOT EXISTS research (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,progress INTEGER NOT NULL DEFAULT 0,commercial_output TEXT NOT NULL,next_action TEXT NOT NULL DEFAULT '');
-            CREATE TABLE IF NOT EXISTS milestones (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,target_date TEXT NOT NULL,progress INTEGER NOT NULL DEFAULT 0,owner TEXT NOT NULL DEFAULT 'Founder');
-            CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS kpis (key TEXT PRIMARY KEY,label TEXT NOT NULL,target REAL NOT NULL DEFAULT 0,actual REAL NOT NULL DEFAULT 0,unit TEXT NOT NULL DEFAULT 'count');
-            """
-        )
-        db.execute("INSERT OR REPLACE INTO schema_meta(key,value) VALUES('version',?)", (VERSION,))
-        defaults = {
-            "organization_name": "Lantern Protocol",
-            "north_star_arr": "9500000",
-            "north_star_date": "2028-02-01",
-            "daily_focus": "Build the category. Ship the platform. Close the revenue.",
-            "github_org": "ShannonBrayNC",
-        }
-        for key, value in defaults.items():
-            db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, value))
-        if db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 0:
-            db.executemany(
-                "INSERT INTO tasks(title,workstream,priority,revenue_impact,due_date) VALUES(?,?,?,?,?)",
-                [
-                    ("Publish ETS category thesis", "Marketing", "P0", "High", "2026-08-03"),
-                    ("Complete evidence-object API slice", "Engineering", "P0", "High", "2026-08-05"),
-                    ("Contact ten design-partner prospects", "Sales", "P0", "High", "2026-08-04"),
-                    ("Advance Evidence Graph working paper", "Research", "P1", "Medium", "2026-08-07"),
-                ],
-            )
-        if db.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 0:
-            db.executemany(
-                "INSERT INTO opportunities(account,stage,value,probability,next_action,next_date) VALUES(?,?,?,?,?,?)",
-                [
-                    ("Healthcare design partner", "Discovery", 75000, .25, "Schedule architecture workshop", "2026-08-05"),
-                    ("State-government pilot", "Prospecting", 150000, .10, "Identify executive sponsor", "2026-08-06"),
-                    ("Enterprise evidence assessment", "Proposal", 50000, .50, "Send scoped proposal", "2026-08-03"),
-                ],
-            )
-        if db.execute("SELECT COUNT(*) FROM research").fetchone()[0] == 0:
-            db.executemany(
-                "INSERT INTO research(title,progress,commercial_output,next_action) VALUES(?,?,?,?)",
-                [
-                    ("Evidence Object Model", 70, "Specification, sales brief, SDK schema", "Complete validation rules"),
-                    ("Evidence Graph Model", 45, "Reference architecture and graph model", "Define contradiction edges"),
-                    ("Policy-Bound Trust Evaluation", 30, "Trust-policy engine requirements", "Formalize threshold semantics"),
-                ],
-            )
-        if db.execute("SELECT COUNT(*) FROM milestones").fetchone()[0] == 0:
-            db.executemany(
-                "INSERT INTO milestones(title,target_date,progress,owner) VALUES(?,?,?,?)",
-                [
-                    ("First design partner", "2026-10-15", 20, "Founder"),
-                    ("ETS alpha demonstration", "2026-12-15", 15, "Founder"),
-                    ("$500K ARR run rate", "2027-02-01", 5, "Founder"),
-                    ("Commercial general availability", "2027-07-15", 2, "Founder"),
-                ],
-            )
-        db.executemany(
-            "INSERT OR IGNORE INTO kpis(key,label,target,actual,unit) VALUES(?,?,?,?,?)",
-            [
-                ("outreach", "Weekly outreach", 50, 0, "count"),
-                ("discovery", "Discovery calls", 10, 0, "count"),
-                ("proposals", "Proposals sent", 3, 0, "count"),
-                ("mrr", "Monthly recurring revenue", 50000, 0, "currency"),
-            ],
-        )
-        db.commit()
-
-
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    initialize_database()
-    yield
-
-
-app = FastAPI(title="Lantern OS", version=VERSION, lifespan=lifespan)
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=session_secret(),
-    https_only=os.getenv("LANTERN_COOKIE_HTTPS_ONLY", "false").lower() == "true",
-    same_site="lax",
-)
-oauth = build_oauth()
+VERSION = "0.7.0"
 
 
 class TaskCreate(BaseModel):
@@ -154,8 +48,88 @@ class KPIUpdate(BaseModel):
     actual: float = Field(ge=0)
 
 
-def row_to_task(row: sqlite3.Row) -> dict:
-    return {**dict(row), "completed": bool(row["completed"])}
+def seed_database(session: Session) -> None:
+    if session.get(SchemaMeta, "version") is None:
+        session.add(SchemaMeta(key="version", value=VERSION))
+    else:
+        session.get(SchemaMeta, "version").value = VERSION
+
+    defaults = {
+        "organization_name": "Lantern Protocol",
+        "north_star_arr": "9500000",
+        "north_star_date": "2028-02-01",
+        "daily_focus": "Build the category. Ship the platform. Close the revenue.",
+        "github_org": "ShannonBrayNC",
+    }
+    for key, value in defaults.items():
+        if session.get(Setting, key) is None:
+            session.add(Setting(key=key, value=value))
+
+    if session.scalar(select(Task.id).limit(1)) is None:
+        session.add_all([
+            Task(title="Publish ETS category thesis", workstream="Marketing", priority="P0", revenue_impact="High", due_date="2026-08-03"),
+            Task(title="Complete evidence-object API slice", workstream="Engineering", priority="P0", revenue_impact="High", due_date="2026-08-05"),
+            Task(title="Contact ten design-partner prospects", workstream="Sales", priority="P0", revenue_impact="High", due_date="2026-08-04"),
+            Task(title="Advance Evidence Graph working paper", workstream="Research", priority="P1", revenue_impact="Medium", due_date="2026-08-07"),
+        ])
+    if session.scalar(select(Opportunity.id).limit(1)) is None:
+        session.add_all([
+            Opportunity(account="Healthcare design partner", stage="Discovery", value=75000, probability=.25, next_action="Schedule architecture workshop", next_date="2026-08-05"),
+            Opportunity(account="State-government pilot", stage="Prospecting", value=150000, probability=.10, next_action="Identify executive sponsor", next_date="2026-08-06"),
+            Opportunity(account="Enterprise evidence assessment", stage="Proposal", value=50000, probability=.50, next_action="Send scoped proposal", next_date="2026-08-03"),
+        ])
+    if session.scalar(select(ResearchProgram.id).limit(1)) is None:
+        session.add_all([
+            ResearchProgram(title="Evidence Object Model", progress=70, commercial_output="Specification, sales brief, SDK schema", next_action="Complete validation rules"),
+            ResearchProgram(title="Evidence Graph Model", progress=45, commercial_output="Reference architecture and graph model", next_action="Define contradiction edges"),
+            ResearchProgram(title="Policy-Bound Trust Evaluation", progress=30, commercial_output="Trust-policy engine requirements", next_action="Formalize threshold semantics"),
+        ])
+    if session.scalar(select(Milestone.id).limit(1)) is None:
+        session.add_all([
+            Milestone(title="First design partner", target_date="2026-10-15", progress=20, owner="Founder"),
+            Milestone(title="ETS alpha demonstration", target_date="2026-12-15", progress=15, owner="Founder"),
+            Milestone(title="$500K ARR run rate", target_date="2027-02-01", progress=5, owner="Founder"),
+            Milestone(title="Commercial general availability", target_date="2027-07-15", progress=2, owner="Founder"),
+        ])
+    for key, label, target, unit in [
+        ("outreach", "Weekly outreach", 50, "count"),
+        ("discovery", "Discovery calls", 10, "count"),
+        ("proposals", "Proposals sent", 3, "count"),
+        ("mrr", "Monthly recurring revenue", 50000, "currency"),
+    ]:
+        if session.get(KPI, key) is None:
+            session.add(KPI(key=key, label=label, target=target, actual=0, unit=unit))
+    session.commit()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        seed_database(session)
+    yield
+
+
+app = FastAPI(title="Lantern OS", version=VERSION, lifespan=lifespan)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=session_secret(),
+    https_only=os.getenv("LANTERN_COOKIE_HTTPS_ONLY", "false").lower() == "true",
+    same_site="lax",
+)
+oauth = build_oauth()
+
+
+def task_dict(task: Task) -> dict:
+    return {
+        "id": task.id,
+        "title": task.title,
+        "workstream": task.workstream,
+        "priority": task.priority,
+        "revenue_impact": task.revenue_impact,
+        "due_date": task.due_date,
+        "completed": bool(task.completed),
+    }
 
 
 def money(value: float) -> str:
@@ -166,17 +140,17 @@ def esc(value: object) -> str:
     return html.escape(str(value))
 
 
-def recommendations(db: sqlite3.Connection) -> list[dict[str, str]]:
+def recommendations(session: Session) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
-    proposal = db.execute("SELECT * FROM opportunities WHERE stage='Proposal' ORDER BY value DESC LIMIT 1").fetchone()
+    proposal = session.scalars(select(Opportunity).where(Opportunity.stage == "Proposal").order_by(Opportunity.value.desc()).limit(1)).first()
     if proposal:
-        items.append({"level": "Revenue", "title": f"Advance {proposal['account']}", "detail": proposal["next_action"] or "Define the next close action."})
-    p0 = db.execute("SELECT * FROM tasks WHERE completed=0 AND priority='P0' ORDER BY due_date LIMIT 1").fetchone()
+        items.append({"level": "Revenue", "title": f"Advance {proposal.account}", "detail": proposal.next_action or "Define the next close action."})
+    p0 = session.scalars(select(Task).where(Task.completed.is_(False), Task.priority == "P0").order_by(Task.due_date).limit(1)).first()
     if p0:
-        items.append({"level": "Execution", "title": p0["title"], "detail": f"Due {p0['due_date'] or 'now'} · {p0['workstream']}"})
-    paper = db.execute("SELECT * FROM research ORDER BY progress DESC LIMIT 1").fetchone()
+        items.append({"level": "Execution", "title": p0.title, "detail": f"Due {p0.due_date or 'now'} · {p0.workstream}"})
+    paper = session.scalars(select(ResearchProgram).order_by(ResearchProgram.progress.desc()).limit(1)).first()
     if paper:
-        items.append({"level": "Research", "title": f"Convert {paper['title']} into market proof", "detail": paper["next_action"] or paper["commercial_output"]})
+        items.append({"level": "Research", "title": f"Convert {paper.title} into market proof", "detail": paper.next_action or paper.commercial_output})
     return items[:3]
 
 
@@ -184,14 +158,12 @@ def recommendations(db: sqlite3.Connection) -> list[dict[str, str]]:
 async def login(request: Request):
     if auth_mode() == "local":
         return RedirectResponse("/")
-    redirect_uri = os.getenv("LANTERN_ENTRA_REDIRECT_URI") or str(request.url_for("auth_callback"))
+    redirect_uri = os.getenv("LANTERN_ENTRA_REDIRECT_URI", str(request.url_for("auth_callback")))
     return await oauth.entra.authorize_redirect(request, redirect_uri)
 
 
 @app.get("/auth/callback", name="auth_callback")
 async def auth_callback(request: Request):
-    if auth_mode() != "entra":
-        return RedirectResponse("/")
     token = await oauth.entra.authorize_access_token(request)
     claims = token.get("userinfo") or await oauth.entra.parse_id_token(request, token)
     request.session["principal"] = principal_from_claims(dict(claims)).to_dict()
@@ -201,110 +173,119 @@ async def auth_callback(request: Request):
 @app.get("/auth/logout")
 def logout(request: Request):
     request.session.clear()
-    return RedirectResponse("/auth/login" if auth_mode() == "entra" else "/")
+    return RedirectResponse("/")
 
 
 @app.get("/api/health")
-def health(db: sqlite3.Connection = Depends(get_db)) -> dict:
-    schema = db.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()
-    return {"status": "ok", "service": "lantern-os", "version": VERSION, "schema": schema[0] if schema else "unknown", "auth_mode": auth_mode()}
+def health(session: Session = Depends(get_session)) -> dict:
+    schema = session.get(SchemaMeta, "version")
+    return {"status": "ok", "service": "lantern-os", "version": VERSION, "schema": schema.value if schema else "unknown", "auth_mode": auth_mode(), "database": engine.dialect.name}
 
 
 @app.get("/api/me")
-def me(principal: Principal = Depends(current_principal)) -> dict:
+def me(principal: Principal = Depends(current_principal)) -> dict[str, str]:
     return principal.to_dict()
 
 
 @app.get("/api/tasks", response_model=list[TaskOut])
-def list_tasks(_: Principal = Depends(require_roles("Viewer")), db: sqlite3.Connection = Depends(get_db)) -> list[dict]:
-    return [row_to_task(row) for row in db.execute("SELECT * FROM tasks ORDER BY completed,priority,due_date").fetchall()]
+def list_tasks(_: Principal = Depends(require_roles("Viewer")), session: Session = Depends(get_session)) -> list[dict]:
+    return [task_dict(item) for item in session.scalars(select(Task).order_by(Task.completed, Task.priority, Task.due_date)).all()]
 
 
 @app.post("/api/tasks", response_model=TaskOut)
-def create_task(payload: TaskCreate, _: Principal = Depends(require_roles("Operator")), db: sqlite3.Connection = Depends(get_db)) -> dict:
-    cursor = db.execute("INSERT INTO tasks(title,workstream,priority,revenue_impact,due_date) VALUES(?,?,?,?,?)", (payload.title, payload.workstream, payload.priority, payload.revenue_impact, payload.due_date))
-    db.commit()
-    return row_to_task(db.execute("SELECT * FROM tasks WHERE id=?", (cursor.lastrowid,)).fetchone())
+def create_task(payload: TaskCreate, _: Principal = Depends(require_roles("Operator")), session: Session = Depends(get_session)) -> dict:
+    task = Task(**payload.model_dump())
+    session.add(task)
+    session.commit()
+    session.refresh(task)
+    return task_dict(task)
 
 
 @app.patch("/api/tasks/{task_id}/toggle", response_model=TaskOut)
-def toggle_task(task_id: int, _: Principal = Depends(require_roles("Operator")), db: sqlite3.Connection = Depends(get_db)) -> dict:
-    row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-    if row is None:
+def toggle_task(task_id: int, _: Principal = Depends(require_roles("Operator")), session: Session = Depends(get_session)) -> dict:
+    task = session.get(Task, task_id)
+    if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    db.execute("UPDATE tasks SET completed=? WHERE id=?", (0 if row["completed"] else 1, task_id))
-    db.commit()
-    return row_to_task(db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
+    task.completed = not task.completed
+    session.commit()
+    session.refresh(task)
+    return task_dict(task)
 
 
 @app.delete("/api/tasks/{task_id}", status_code=204)
-def delete_task(task_id: int, _: Principal = Depends(require_roles("Operator")), db: sqlite3.Connection = Depends(get_db)) -> None:
-    cursor = db.execute("DELETE FROM tasks WHERE id=?", (task_id,))
-    db.commit()
-    if cursor.rowcount == 0:
+def delete_task(task_id: int, _: Principal = Depends(require_roles("Owner")), session: Session = Depends(get_session)) -> None:
+    task = session.get(Task, task_id)
+    if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    session.delete(task)
+    session.commit()
 
 
 @app.get("/api/settings")
-def list_settings(_: Principal = Depends(require_roles("Viewer")), db: sqlite3.Connection = Depends(get_db)) -> dict[str, str]:
-    return {row["key"]: row["value"] for row in db.execute("SELECT * FROM settings").fetchall()}
+def list_settings(_: Principal = Depends(require_roles("Viewer")), session: Session = Depends(get_session)) -> dict[str, str]:
+    return {item.key: item.value for item in session.scalars(select(Setting)).all()}
 
 
 @app.put("/api/settings/{key}")
-def update_setting(key: str, payload: SettingUpdate, _: Principal = Depends(require_roles("Executive")), db: sqlite3.Connection = Depends(get_db)) -> dict:
-    db.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, payload.value))
-    db.commit()
+def update_setting(key: str, payload: SettingUpdate, _: Principal = Depends(require_roles("Executive")), session: Session = Depends(get_session)) -> dict:
+    item = session.get(Setting, key)
+    if item is None:
+        item = Setting(key=key, value=payload.value)
+        session.add(item)
+    else:
+        item.value = payload.value
+    session.commit()
     return {"key": key, "value": payload.value}
 
 
 @app.get("/api/kpis")
-def list_kpis(_: Principal = Depends(require_roles("Viewer")), db: sqlite3.Connection = Depends(get_db)) -> list[dict]:
-    return [dict(row) for row in db.execute("SELECT * FROM kpis ORDER BY key").fetchall()]
+def list_kpis(_: Principal = Depends(require_roles("Viewer")), session: Session = Depends(get_session)) -> list[dict]:
+    return [{"key": item.key, "label": item.label, "target": item.target, "actual": item.actual, "unit": item.unit} for item in session.scalars(select(KPI).order_by(KPI.key)).all()]
 
 
 @app.patch("/api/kpis/{key}")
-def update_kpi(key: str, payload: KPIUpdate, _: Principal = Depends(require_roles("Operator")), db: sqlite3.Connection = Depends(get_db)) -> dict:
-    cursor = db.execute("UPDATE kpis SET actual=? WHERE key=?", (payload.actual, key))
-    db.commit()
-    if cursor.rowcount == 0:
+def update_kpi(key: str, payload: KPIUpdate, _: Principal = Depends(require_roles("Operator")), session: Session = Depends(get_session)) -> dict:
+    item = session.get(KPI, key)
+    if item is None:
         raise HTTPException(status_code=404, detail="KPI not found")
-    return dict(db.execute("SELECT * FROM kpis WHERE key=?", (key,)).fetchone())
+    item.actual = payload.actual
+    session.commit()
+    return {"key": item.key, "label": item.label, "target": item.target, "actual": item.actual, "unit": item.unit}
 
 
 @app.get("/api/recommendations")
-def get_recommendations(_: Principal = Depends(require_roles("Viewer")), db: sqlite3.Connection = Depends(get_db)) -> list[dict[str, str]]:
-    return recommendations(db)
+def get_recommendations(_: Principal = Depends(require_roles("Viewer")), session: Session = Depends(get_session)) -> list[dict[str, str]]:
+    return recommendations(session)
 
 
-def render_dashboard(db: sqlite3.Connection, principal: Principal) -> str:
-    settings = {row["key"]: row["value"] for row in db.execute("SELECT * FROM settings").fetchall()}
-    tasks = db.execute("SELECT * FROM tasks ORDER BY completed,priority,due_date").fetchall()
-    opportunities = db.execute("SELECT * FROM opportunities ORDER BY value DESC").fetchall()
-    research = db.execute("SELECT * FROM research ORDER BY progress DESC").fetchall()
-    milestones = db.execute("SELECT * FROM milestones ORDER BY target_date").fetchall()
-    kpis = db.execute("SELECT * FROM kpis ORDER BY key").fetchall()
-    recs = recommendations(db)
-    pipeline = sum(row["value"] for row in opportunities)
-    weighted = sum(row["value"] * row["probability"] for row in opportunities)
-    completed = sum(row["completed"] for row in tasks)
+def render_dashboard(session: Session, principal: Principal) -> str:
+    settings = {item.key: item.value for item in session.scalars(select(Setting)).all()}
+    tasks = session.scalars(select(Task).order_by(Task.completed, Task.priority, Task.due_date)).all()
+    opportunities = session.scalars(select(Opportunity).order_by(Opportunity.value.desc())).all()
+    research = session.scalars(select(ResearchProgram).order_by(ResearchProgram.progress.desc())).all()
+    milestones = session.scalars(select(Milestone).order_by(Milestone.target_date)).all()
+    kpis = session.scalars(select(KPI).order_by(KPI.key)).all()
+    recs = recommendations(session)
+    pipeline = sum(item.value for item in opportunities)
+    weighted = sum(item.value * item.probability for item in opportunities)
+    completed = sum(1 for item in tasks if item.completed)
     progress = round((completed / len(tasks) * 100) if tasks else 0)
-    overdue = sum(1 for row in tasks if not row["completed"] and row["due_date"] and row["due_date"] < date.today().isoformat())
-    task_rows = "".join(f'<tr class="{"done" if row["completed"] else ""}"><td><input type="checkbox" {"checked" if row["completed"] else ""} onchange="toggleTask({row["id"]})"></td><td><b>{esc(row["title"])}</b><small>{esc(row["workstream"])}</small></td><td><span class="pill">{esc(row["priority"])}</span></td><td>{esc(row["due_date"] or "—")}</td><td>{esc(row["revenue_impact"])}</td></tr>' for row in tasks)
-    deal_cards = "".join(f'<article><span>{esc(row["stage"])}</span><h3>{esc(row["account"])}</h3><b>{money(row["value"])}</b><small>{esc(row["next_action"] or "No next action")}</small></article>' for row in opportunities)
-    research_cards = "".join(f'<article><span>{row["progress"]}%</span><h3>{esc(row["title"])}</h3><div class="bar"><i style="width:{row["progress"]}%"></i></div><small>{esc(row["next_action"] or row["commercial_output"])}</small></article>' for row in research)
-    milestone_rows = "".join(f'<li><div><b>{esc(row["title"])}</b><small>{esc(row["owner"])}</small></div><span>{esc(row["target_date"])} · {row["progress"]}%</span></li>' for row in milestones)
-    rec_cards = "".join(f'<article class="recommend"><span>{esc(item["level"])}</span><h3>{esc(item["title"])}</h3><p>{esc(item["detail"])}</p></article>' for item in recs)
-    kpi_cards = "".join(f'<article><small>{esc(row["label"])}</small><b>{money(row["actual"]) if row["unit"] == "currency" else int(row["actual"])}</b><span>Target {money(row["target"]) if row["unit"] == "currency" else int(row["target"])}</span></article>' for row in kpis)
+    overdue = sum(1 for item in tasks if not item.completed and item.due_date and item.due_date < date.today().isoformat())
+    task_rows = "".join(f'<tr class="{"done" if r.completed else ""}"><td><input type="checkbox" {"checked" if r.completed else ""} onchange="toggleTask({r.id})"></td><td><b>{esc(r.title)}</b><small>{esc(r.workstream)}</small></td><td>{esc(r.priority)}</td><td>{esc(r.due_date or "—")}</td><td>{esc(r.revenue_impact)}</td></tr>' for r in tasks)
+    rec_cards = "".join(f'<article><span>{esc(i["level"])}</span><h3>{esc(i["title"])}</h3><p>{esc(i["detail"])}</p></article>' for i in recs)
+    deal_cards = "".join(f'<article><span>{esc(r.stage)}</span><h3>{esc(r.account)}</h3><b>{money(r.value)}</b><small>{esc(r.next_action)}</small></article>' for r in opportunities)
+    research_cards = "".join(f'<article><span>{r.progress}%</span><h3>{esc(r.title)}</h3><small>{esc(r.next_action or r.commercial_output)}</small></article>' for r in research)
+    milestone_rows = "".join(f'<li><b>{esc(r.title)}</b><span>{esc(r.target_date)} · {r.progress}%</span></li>' for r in milestones)
+    kpi_cards = "".join(f'<article><small>{esc(r.label)}</small><b>{money(r.actual) if r.unit == "currency" else int(r.actual)}</b><span>Target {money(r.target) if r.unit == "currency" else int(r.target)}</span></article>' for r in kpis)
     org = esc(settings.get("organization_name", "Lantern Protocol"))
     focus = esc(settings.get("daily_focus", "Build the category. Ship the platform. Close the revenue."))
     north_star = float(settings.get("north_star_arr", "9500000"))
-    user = f"{esc(principal.name)} · {esc(principal.role)}"
-    return f"""<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Lantern OS {VERSION}</title><style>{CSS}</style></head><body><aside><h1>◇ Lantern OS</h1><p>Command Center</p><nav><a class='active' href='/'>Mission Control</a><a href='#today'>Today's Plan</a><a href='#revenue'>Sales CRM</a><a href='#research'>Research</a><a href='#roadmap'>Roadmap</a><a href='/docs'>API</a><a href='/auth/logout'>Sign out</a></nav><footer><small>NORTH STAR</small><b>{money(north_star)} ARR</b><span>{esc(settings.get('north_star_date','2028-02-01'))}</span><em>v{VERSION}</em></footer></aside><main><header><div><small>{org.upper()}</small><h2>Mission Control</h2><span>{user}</span></div><time>{date.today()}</time></header><section class='hero'><div><small>OPERATING MANDATE</small><h3>{focus}</h3><p>Daily command center for ETS commercialization.</p></div><strong>{progress}%<small> execution complete</small></strong></section><section class='stats'><article><small>Total pipeline</small><b>{money(pipeline)}</b></article><article><small>Weighted pipeline</small><b>{money(weighted)}</b></article><article><small>Open tasks</small><b>{len(tasks)-completed}</b><span>{overdue} overdue</span></article><article><small>Research programs</small><b>{len(research)}</b></article></section><section class='panel'><div class='section-head'><div><small>DECISION SUPPORT</small><h3>Today's recommended moves</h3></div><span>{datetime.now().strftime('%H:%M')}</span></div><div class='recommendations'>{rec_cards}</div></section><section class='panel' id='today'><div class='section-head'><h3>Daily execution</h3><span>{completed}/{len(tasks)} complete</span></div><table><thead><tr><th>Done</th><th>Task</th><th>Priority</th><th>Due</th><th>Impact</th></tr></thead><tbody>{task_rows}</tbody></table></section><section class='panel'><div class='section-head'><h3>Operating KPIs</h3><span>Current period</span></div><div class='stats kpis'>{kpi_cards}</div></section><section class='grid'><div class='panel' id='revenue'><h3>Revenue engine</h3><div class='cards'>{deal_cards}</div></div><div class='panel' id='research'><h3>Research-to-revenue</h3><div class='cards'>{research_cards}</div></div></section><section class='panel' id='roadmap'><h3>18-month milestones</h3><ul>{milestone_rows}</ul></section><script>async function toggleTask(id){{const r=await fetch(`/api/tasks/${{id}}/toggle`,{{method:'PATCH'}});if(r.status===401)location='/auth/login';else if(r.status===403)alert('Your role cannot modify tasks.');else location.reload();}}</script></main></body></html>"""
+    return f"""<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Lantern OS {VERSION}</title><style>{CSS}</style></head><body><aside><h1>◇ Lantern OS</h1><p>Command Center</p><nav><a href='/'>Mission Control</a><a href='#today'>Today's Plan</a><a href='#revenue'>Sales CRM</a><a href='#research'>Research</a><a href='#roadmap'>Roadmap</a><a href='/docs'>API</a></nav><footer><small>NORTH STAR</small><b>{money(north_star)} ARR</b><span>{esc(settings.get('north_star_date','2028-02-01'))}</span><em>v{VERSION}</em></footer></aside><main><header><div><small>{org.upper()}</small><h2>Mission Control</h2></div><div><b>{esc(principal.name)}</b><small>{esc(principal.role)} · {engine.dialect.name}</small></div></header><section class='hero'><div><small>OPERATING MANDATE</small><h3>{focus}</h3><p>Daily command center for ETS commercialization.</p></div><strong>{progress}%<small> execution complete</small></strong></section><section class='stats'><article><small>Total pipeline</small><b>{money(pipeline)}</b></article><article><small>Weighted pipeline</small><b>{money(weighted)}</b></article><article><small>Open tasks</small><b>{len(tasks)-completed}</b><span>{overdue} overdue</span></article><article><small>Research programs</small><b>{len(research)}</b></article></section><section class='panel'><h3>Today's recommended moves</h3><div class='cards'>{rec_cards}</div></section><section class='panel' id='today'><h3>Daily execution</h3><table><thead><tr><th>Done</th><th>Task</th><th>Priority</th><th>Due</th><th>Impact</th></tr></thead><tbody>{task_rows}</tbody></table></section><section class='panel'><h3>Operating KPIs</h3><div class='stats'>{kpi_cards}</div></section><section class='grid'><div class='panel' id='revenue'><h3>Revenue engine</h3><div class='cards'>{deal_cards}</div></div><div class='panel' id='research'><h3>Research-to-revenue</h3><div class='cards'>{research_cards}</div></div></section><section class='panel' id='roadmap'><h3>18-month milestones</h3><ul>{milestone_rows}</ul></section><script>async function toggleTask(id){{await fetch(`/api/tasks/${{id}}/toggle`,{{method:'PATCH'}});location.reload();}}</script></main></body></html>"""
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(principal: Principal = Depends(current_principal), db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
-    return HTMLResponse(render_dashboard(db, principal))
+def dashboard(principal: Principal = Depends(current_principal), session: Session = Depends(get_session)) -> HTMLResponse:
+    return HTMLResponse(render_dashboard(session, principal))
 
 
-CSS = ":root{--bg:#080d12;--panel:#101821;--panel2:#131e29;--line:#263444;--text:#f1f5f9;--muted:#92a6ba;--gold:#f0bd45;--green:#45d2a8}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,sans-serif;display:flex;min-height:100vh}aside{position:fixed;width:250px;height:100vh;border-right:1px solid var(--line);padding:30px;background:#0a1118}aside h1{margin:0;color:var(--gold);font-size:34px}aside p,small,span{color:var(--muted)}nav{display:grid;gap:7px;margin-top:34px}nav a{color:var(--text);text-decoration:none;padding:12px 14px;border-radius:9px}nav a:hover,nav a.active{background:var(--panel2);color:var(--gold)}footer{position:absolute;bottom:26px;display:grid;gap:5px}footer b{font-size:22px;color:var(--gold)}footer em{font-size:12px;color:var(--muted);margin-top:8px}main{margin-left:250px;padding:34px;width:calc(100% - 250px);max-width:1500px}header{display:flex;justify-content:space-between;align-items:center}header h2{font-size:38px;margin:5px 0 4px}.hero{border:1px solid var(--line);background:linear-gradient(130deg,#14202b,#0e161e);padding:30px;border-radius:18px;display:flex;justify-content:space-between;align-items:center;margin-top:24px}.hero h3{font-size:31px;margin:7px 0;max-width:900px}.hero strong{font-size:46px;color:var(--gold)}.hero strong small{display:block;font-size:12px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0}.stats article,.panel,.cards article,.recommend{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}.stats b{display:block;font-size:28px;margin:8px 0 3px}.panel{margin-bottom:18px}.section-head{display:flex;justify-content:space-between;align-items:center}.section-head h3{margin:5px 0 16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.cards{display:grid;gap:10px}.cards article{display:grid;gap:7px;background:var(--panel2)}.cards article b{font-size:22px;color:var(--gold)}.bar{height:7px;background:#26313d;border-radius:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--green)}.recommendations{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.recommend{background:var(--panel2)}.recommend span,.pill{display:inline-block;color:var(--gold);font-size:12px;font-weight:700}.recommend h3{margin:8px 0}.recommend p{color:var(--muted);margin:0;line-height:1.5}.kpis{margin-bottom:0}.kpis article span{display:block;font-size:12px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line)}td small{display:block;margin-top:4px}.done{opacity:.45;text-decoration:line-through}ul{list-style:none;padding:0}li{display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--line)}li div{display:grid;gap:4px}@media(max-width:1000px){aside{position:static;width:100%;height:auto}aside footer{display:none}body{display:block}main{margin:0;width:100%}.stats,.grid,.recommendations{grid-template-columns:1fr 1fr}}@media(max-width:650px){.stats,.grid,.recommendations{grid-template-columns:1fr}.hero strong{display:none}table{display:block;overflow:auto}}"
+CSS = ":root{--bg:#080d12;--panel:#101821;--line:#263444;--text:#f1f5f9;--muted:#92a6ba;--gold:#f0bd45}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Segoe UI,sans-serif;display:flex;min-height:100vh}aside{position:fixed;width:250px;height:100vh;border-right:1px solid var(--line);padding:30px;background:#0a1118}aside h1{color:var(--gold);font-size:34px}nav{display:grid;gap:8px;margin-top:30px}nav a{color:var(--text);text-decoration:none;padding:10px}footer{position:absolute;bottom:25px;display:grid;gap:5px}footer b{color:var(--gold)}main{margin-left:250px;padding:34px;width:calc(100% - 250px)}header,.hero{display:flex;justify-content:space-between;align-items:center}.hero,.panel,.stats article,.cards article{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}.hero strong{font-size:44px;color:var(--gold)}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0}.stats b{display:block;font-size:28px}.panel{margin-bottom:18px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.cards{display:grid;gap:10px}.cards article span{color:var(--gold)}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line)}td small,header small{display:block;color:var(--muted)}.done{opacity:.45;text-decoration:line-through}ul{list-style:none;padding:0}li{display:flex;justify-content:space-between;padding:12px;border-bottom:1px solid var(--line)}@media(max-width:900px){aside{position:static;width:100%;height:auto}aside footer{display:none}body{display:block}main{margin:0;width:100%}.stats,.grid{grid-template-columns:1fr 1fr}}@media(max-width:600px){.stats,.grid{grid-template-columns:1fr}.hero strong{display:none}}"
