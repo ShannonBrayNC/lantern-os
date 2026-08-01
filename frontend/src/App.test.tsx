@@ -3,7 +3,7 @@ import { vi } from 'vitest'
 import App from './App'
 
 vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
-  const path = String(input)
+  const path = input instanceof Request ? input.url : input instanceof URL ? input.href : input
   const payload = path.endsWith('/api/me')
     ? { subject: 'local', name: 'Lantern Owner', email: 'owner@localhost', role: 'Owner', source: 'local' }
     : path.endsWith('/api/tasks')
