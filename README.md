@@ -1,5 +1,24 @@
 # Lantern OS
 
-Lantern OS is the operating platform for Lantern Protocol: daily execution, product delivery, research commercialization, sales pipeline, and executive governance.
+Lantern OS is the operating platform for Lantern Protocol and ETS commercialization.
 
-The initial production scaffold is being developed through pull requests.
+## Current release
+
+`0.5.0` internal release candidate provides Mission Control, daily execution, revenue pipeline, research commercialization, milestone tracking, persistent settings, KPI scorecards, and actionable recommendations.
+
+## Windows
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\run.ps1
+```
+
+Open `http://localhost:8000`. API documentation is at `http://localhost:8000/docs`.
+
+## Validation
+
+```powershell
+python -m pytest -q
+```
+
+See `docs/RELEASE-0.5.0.md` for scope and exit criteria.
