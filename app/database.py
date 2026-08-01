@@ -27,12 +27,11 @@ def create_database_engine() -> Engine:
 
 
 def normalize_legacy_data(target_engine: Engine) -> None:
-    """Repair values accepted by legacy SQLite schemas but rejected by typed ORM columns.
+    """Repair values accepted by legacy schemas but rejected by typed ORM columns.
 
     Older Lantern OS builds stored an empty string in ``tasks.created_at``. SQLAlchemy's
-    DateTime processor correctly rejects that value before model instances can load.
-    Normalize it before the first ORM query. The statement is safe and idempotent on
-    both SQLite and PostgreSQL.
+    DateTime processor rejects that value before a Task can load. Normalize it before
+    the first ORM query. This operation is safe and idempotent on SQLite and PostgreSQL.
     """
     inspector = inspect(target_engine)
     if "tasks" not in inspector.get_table_names():
@@ -52,6 +51,7 @@ def normalize_legacy_data(target_engine: Engine) -> None:
 
 
 engine = create_database_engine()
+normalize_legacy_data(engine)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
