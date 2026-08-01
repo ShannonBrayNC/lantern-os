@@ -20,3 +20,34 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
       - run: python -m pytest -q
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: lantern
+          POSTGRES_USER: lantern
+          POSTGRES_PASSWORD: lantern
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lantern -d lantern"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      LANTERN_DATABASE_URL: postgresql+psycopg://lantern:lantern@localhost:5432/lantern
+      LANTERN_AUTH_MODE: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - run: alembic upgrade head
+      - run: python -m pytest -q
+      - run: python -m scripts.seed

@@ -1,7 +1,29 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: lantern
+      POSTGRES_USER: lantern
+      POSTGRES_PASSWORD: lantern-local-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lantern -d lantern"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - lantern-postgres:/var/lib/postgresql/data
+
   lantern-os:
     build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      LANTERN_DATABASE_URL: postgresql+psycopg://lantern:lantern-local-only@postgres:5432/lantern
+      LANTERN_AUTH_MODE: local
     ports:
       - "8000:8000"
-    volumes:
-      - ./data:/app/data
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+
+volumes:
+  lantern-postgres:
