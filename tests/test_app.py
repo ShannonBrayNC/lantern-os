@@ -5,15 +5,15 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("LANTERN_AUTH_MODE", "local")
 os.environ.setdefault("LANTERN_LOCAL_ROLE", "Owner")
 
-from app.main import app
+from app.main import VERSION, app
 
 
 def test_health_reports_auth_and_database():
     with TestClient(app) as client:
         response = client.get("/api/health")
         assert response.status_code == 200
-        assert response.json()["version"] == "0.7.0"
-        assert response.json()["schema"] == "0.7.0"
+        assert response.json()["version"] == VERSION
+        assert response.json()["schema"] == VERSION
         assert response.json()["auth_mode"] == "local"
         assert response.json()["database"] in {"sqlite", "postgresql"}
 
