@@ -9,7 +9,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_SQLITE_URL = f"sqlite:///{(BASE_DIR / 'data' / 'lantern.db').as_posix()}"
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_SQLITE_URL = f"sqlite:///{(DATA_DIR / 'lantern.db').as_posix()}"
 
 
 def database_url() -> str:
