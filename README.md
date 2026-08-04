@@ -1,6 +1,27 @@
-# Lantern OS
+# Lantern Mission Control
 
-Lantern OS is the operating platform for Lantern Protocol and ETS commercialization.
+This repository contains Lantern Mission Control, the business and program operating application for Lantern Protocol commercialization.
+
+It owns:
+
+- daily execution and task management;
+- revenue pipeline and KPI scorecards;
+- research-commercialization tracking;
+- engineering portfolio visibility;
+- milestone, settings, and recommendation workflows;
+- the Mission Control FastAPI and React application.
+
+It does **not** own the ETS Edge appliance operating system, appliance runtime, local appliance portal, image construction, systemd packaging, device identity, collectors, synchronization agent, update/rollback implementation, or physical-hardware acceptance.
+
+The authoritative ETS Edge appliance repository is:
+
+`Lantern-Protocol/Operating-System`
+
+The authoritative ETS protocol and core library repository is:
+
+`ShannonBrayNC/ETS`
+
+The proposed `lantern_runtime` prototype from issue #12 and PR #13 is retired from this repository. Its accepted design concepts are tracked for implementation in `Lantern-Protocol/Operating-System` issue #79.
 
 ## Current release
 
