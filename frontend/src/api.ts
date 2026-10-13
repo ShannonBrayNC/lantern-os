@@ -45,15 +45,24 @@ export type EngineeringPortfolio = {
   refreshed_at: string
 }
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(path, { credentials: 'same-origin' })
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    ...init
+  })
+  if (!response.ok) {
+    const detail = await response.text()
+    throw new Error(detail || `${response.status} ${response.statusText}`)
+  }
+  if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
 
 export const api = {
   principal: () => request<Principal>('/api/me'),
   tasks: () => request<Task[]>('/api/tasks'),
+  toggleTask: (taskId: number) => request<Task>(`/api/tasks/${taskId}/toggle`, { method: 'PATCH' }),
   recommendations: () => request<Recommendation[]>('/api/recommendations'),
   engineering: () => request<EngineeringPortfolio>('/api/engineering')
 }
